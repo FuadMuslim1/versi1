@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- HELPER FUNCTIONS ---
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // HARDCODED ADMIN EMAILS (Strict Exact Match)
+    function isReferralAdmin() {
+      return getEmail() == 'adminreferralcodegeuwat@email.com';
+    }
+    
+    function isDatabaseAdmin() {
+      return getEmail() == 'admindatabasegeuwat@email.com';
+    }
+    
+    function isRewardAdmin() {
+      return getEmail() == 'adminrewardgeuwat@email.com';
+    }
+    
+    function isNotificationAdmin() {
+      return getEmail() == 'adminnotificationgeuwat@email.com';
+    }
+
+    // GOD MODE: The Lord Admin
+    function isLord() {
+      return getEmail() == 'adminlordgeuwat@email.com';
+    }
+
+    function isAnyAdmin() {
+      return isSignedIn() && (
+        isReferralAdmin() || 
+        isDatabaseAdmin() || 
+        isRewardAdmin() || 
+        isNotificationAdmin() ||
+        isLord()
+      );
+    }
+
+    // --- COLLECTION RULES ---
+    // Note: isLord() ditambahkan dengan logika OR (||) di setiap rule penting
+
+    // 1. Admin Profiles (Self Management)
+    match /admin_referral_code/{docId} {
+      allow read, write: if isSignedIn() && (isReferralAdmin() || isLord());
+    }
+
+    match /admin_database/{docId} {
+      allow read, write: if isSignedIn() && (isDatabaseAdmin() || isLord());
+    }
+
+    match /admin_reward/{docId} {
+      allow read, write: if isSignedIn() && (isRewardAdmin() || isLord());
+    }
+
+    match /admin_notification/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isNotificationAdmin() || isLord());
+    }
+    
+    // Lord Collection (Optional, for self profile)
+    match /admin_lord/{docId} {
+      allow read, write: if isSignedIn() && isLord();
+    }
+
+    // 2. User Profiles
+    match /users/{emailId} {
+      // READ
+      allow read: if isSignedIn() && (
+        getEmail() == emailId || 
+        isDatabaseAdmin() || 
+        isRewardAdmin() || 
+        isReferralAdmin() ||
+        isLord()
+      );
+      
+      // CREATE
+      allow create: if isSignedIn() && (
+        getEmail() == emailId || 
+        isDatabaseAdmin() ||
+        isLord()
+      );
+      
+      // DELETE
+      allow delete: if isSignedIn() && (isDatabaseAdmin() || isLord());
+      
+      // UPDATE
+      allow update: if isSignedIn() && (
+        getEmail() == emailId || 
+        isDatabaseAdmin() || 
+        isRewardAdmin() ||
+        isLord()
+      );
+    }
+    
+    // 2.5 USER NOTIFICATIONS (FIX PERMISSION DENIED)
+    match /user_notifications/{notifId} {
+      // User can read their own notifs. Admins can read/write all.
+      allow read: if isSignedIn() && (
+        resource.data.userEmail == getEmail() || 
+        isAnyAdmin()
+      );
+      allow create, update, delete: if isSignedIn() && isAnyAdmin();
+    }
+
+    // 3. Registrations (Antrian)
+    match /registrations/{regId} {
+      allow create: if isSignedIn();
+      
+      allow read: if isSignedIn() && (
+        isAnyAdmin() || 
+        resource.data.email == getEmail()
+      );
+      
+      allow update: if isSignedIn() && (
+        isReferralAdmin() || 
+        isRewardAdmin() ||
+        isDatabaseAdmin() ||
+        isLord()
+      );
+      
+      allow delete: if isSignedIn() && (isReferralAdmin() || isLord());
+    }
+
+    // 4. Reward Calculations
+    match /reward_calculations/{docId} {
+      allow read, write: if isSignedIn() && (isRewardAdmin() || isLord());
+    }
+
+    // 5. Content
+    match /progress/{docId} {
+      allow read, write: if isSignedIn() && (resource == null || resource.data.email == getEmail() || isLord());
+    }
+    
+    match /lessons/{lessonId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isDatabaseAdmin() || isLord());
+    }
+    
+    // 6. Generic Fallback for Lord (Untuk collection lain yang mungkin dibuat di masa depan)
+    match /{path=**}/documents {
+       allow read, write: if isSignedIn() && isLord();
+    }
+  }
+}
